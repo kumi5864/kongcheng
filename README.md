@@ -33,3 +33,8 @@
 ## 技术
 
 单文件 HTML（17 MB，模型/贴图/音效全部内嵌），Three.js 从 CDN 加载。双击本地文件也能直接玩。
+
+## 素材与授权
+
+3D 模型来自 **Quaternius** 的 *Zombie Apocalypse Kit*，授权 **CC0 1.0**（公有领域，不要求署名，这里主动标注）。
+详见 [CREDITS.md](CREDITS.md)。
