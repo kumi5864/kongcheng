@@ -189,6 +189,11 @@
   .hero b { display: block; font-size: 13px; margin-bottom: 3px; }
   .hero span { color: #7f90a4; font-size: 11px; }
 
+  #overlay.paused .heroes,
+  #overlay.paused #galleryBtn,
+  #overlay.paused #debugBtn,
+  #overlay.paused #endlessBtn { display: none; }
+
   #overlay h1 { font-size: 30px; font-weight: 600; letter-spacing: .1em; }
   #overlay .sub { font-size: 11px; letter-spacing: .24em; color: #55616f; }
   .keys { display: flex; flex-wrap: wrap; gap: 10px 20px; justify-content: center; max-width: 620px; margin: 6px 0 2px; }
@@ -252,8 +257,14 @@
   /* 开箱 / 背包面板 */
   #loot, #bag { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 11;
     display: none; flex-direction: column; min-width: 340px; padding: 18px 20px 16px;
+    max-height: 78vh; overflow: hidden;
     background: #0b1016; border: 1px solid #2b3542; border-radius: 8px;
     box-shadow: 0 18px 50px rgba(0, 0, 0, .6); }
+  #bagList, #lootList { overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
+  #bagList::-webkit-scrollbar, #lootList::-webkit-scrollbar { width: 8px; }
+  #bagList::-webkit-scrollbar-thumb, #lootList::-webkit-scrollbar-thumb {
+    background: #2b3a48; border-radius: 4px; }
+  #bagList::-webkit-scrollbar-track, #lootList::-webkit-scrollbar-track { background: #0d141b; }
   #loot.show, #bag.show { display: flex; }
   #loot h2, #bag h2 { font-size: 14px; font-weight: 600; letter-spacing: .18em; color: #8fa0b4;
     margin-bottom: 12px; }
@@ -266,7 +277,14 @@
   #bag .row { cursor: default; }
   #loot .row:hover { background: #1a2632; border-color: #3b5065; }
   #bag .row .v { color: #7fd8b4; font-family: ui-monospace, Consolas, monospace; }
-  #bag .row.usable { cursor: pointer; border-color: #33566b; }
+  #bag .row.usable { cursor: pointer; border-color: #33566b; cursor: grab; }
+  #bag .row .del {
+    margin-left: 8px; width: 22px; height: 22px; flex: 0 0 22px; padding: 0;
+    border: 1px solid #3a2a2a; border-radius: 4px; background: #1a1212; color: #d08a7a;
+    font: 12px/1 ui-monospace, Consolas, monospace; cursor: pointer;
+  }
+  #bag .row .del:hover { background: #3a1c1c; color: #ff9a7a; border-color: #6b2b2b; }
+  #bag .row.ghost { opacity: .9; box-shadow: 0 6px 20px rgba(0,0,0,.6); }
   #bag .row.usable:hover { background: #16232d; border-color: #4b7a96; }
   #loot .row .v { color: #6d8299; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
   #loot .empty, #bag .empty { color: #5f6b7a; font: 13px/1.8 inherit; padding: 6px 2px 12px; }
@@ -425,7 +443,7 @@
   <div id="hpbox">
     <div id="hpLine"><span id="hpNum">100</span><small>HP</small></div>
     <div id="hpBar"><div id="hpFill"></div></div>
-    <div id="counts">剩余 <b id="aliveNum">0</b> &nbsp;·&nbsp; 击杀 <b id="killNum">0</b> &nbsp;·&nbsp; 背包 <b id="bagNum">0</b>/6 &nbsp;·&nbsp; 金币 <b id="goldNum">0</b></div>
+    <div id="counts">剩余 <b id="aliveNum">0</b> &nbsp;·&nbsp; 击杀 <b id="killNum">0</b> &nbsp;·&nbsp; 背包 <b id="bagNum">0</b>/<span id="bagCapNum">10</span> &nbsp;·&nbsp; 金币 <b id="goldNum">0</b></div>
   </div>
 
   <div id="dryHint">换弹 <kbd>R</kbd></div>
@@ -448,7 +466,7 @@
     <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 移动</span>
     <span><kbd>左键</kbd> 开火</span>
     <span><kbd>R</kbd> 换弹</span>
-    <span><kbd>V</kbd> 近战</span>
+    <span><kbd>右键</kbd> 近战</span>
     <span><kbd>E</kbd> 搜索</span>
     <span><kbd>B</kbd> 背包</span>
     <span><kbd>空格</kbd> 跳</span>
@@ -279733,8 +279751,17 @@ function fatal(where, e) {
   errBox.textContent = '出错了：' + where + '\n' + (e && (e.stack || e.message) || e);
   console.error(where, e);
 }
-window.addEventListener('error', (ev) => fatal('运行时错误', ev.error || ev.message));
-window.addEventListener('unhandledrejection', (ev) => fatal('运行时错误', ev.reason));
+function isLockNoise(msg) { return /pointer ?lock/i.test(String(msg || '')); }
+window.addEventListener('error', (ev) => {
+  const msg = (ev.error && ev.error.message) || ev.message || '';
+  if (isLockNoise(msg)) { ev.preventDefault(); return; }   // 鼠标锁定冷却期的报错，忽略
+  fatal('运行时错误', ev.error || ev.message);
+});
+window.addEventListener('unhandledrejection', (ev) => {
+  const msg = (ev.reason && ev.reason.message) || ev.reason || '';
+  if (isLockNoise(msg)) { ev.preventDefault(); return; }
+  fatal('运行时错误', ev.reason);
+});
 
 /* ==========================================================================
    P0 · 能走
@@ -279798,7 +279825,7 @@ const Sound = (() => {
       try {
         ac = new (window.AudioContext || window.webkitAudioContext)();
         master = ac.createGain();
-        master.gain.value = 0.5;
+        master.gain.value = 0.7;
         master.connect(ac.destination);
       } catch (e) { ac = null; }
     }
@@ -279900,7 +279927,7 @@ const Sound = (() => {
     },
     setVolume(v) {
       const a = ctx();
-      if (a && master) master.gain.value = Math.max(0, Math.min(1, v)) * 0.5;
+      if (a && master) master.gain.value = Math.max(0, Math.min(1, v)) * 0.95;
     },
     swing() { noise(0.12, 0.15, 1600); },
   };
@@ -280148,6 +280175,7 @@ function makeDebugLayout() {
       { x: 30, z: 60, w: 60 + WT, d: WT, dir: 'S' },
     ],
     crates: [[6, 6], [18, 6], [40, 6], [6, 40], [18, 40], [40, 40], [30, 12], [30, 48]],
+    props: [{ x: 14, z: 30, stack: true }, { x: 26, z: 30, stack: true }, { x: 30, z: 36, stack: false }],
     fuel: [{ x: 12, z: 20 }],
     repair: [{ x: 40, z: 46 }],
     floor: { cx: 30, cz: 30, w: 64, d: 64 },
@@ -280376,6 +280404,7 @@ function generateLayout(levelNum, seed) {
     cover,
     walls,
     crates: crates.slice(0, 8).concat(alleyCrates),
+    props: crates.slice(8, 13).map(([px, pz], i) => ({ x: px, z: pz, stack: i % 3 === 0 })),
     fuel,
     repair,
     floor: { cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2, w: maxX - minX + 4, d: maxZ - minZ + 4 },
@@ -280537,6 +280566,10 @@ function buildLevel(idx) {
   }
 
   makeCrates(L.crates);
+  for (const pr of L.props || []) {
+    makeEmptyCrate(pr.x, pr.z, 0);
+    if (pr.stack) makeEmptyCrate(pr.x, pr.z, 0.86);   // 叠一个，当二级台阶
+  }
 
   placeExtract(L.extract.x, L.extract.z);
   maybeSpawnMerchant(idx, L);       // 保底看的是"第几关"，不是模板号
@@ -280585,6 +280618,10 @@ function buildGenerated(L, levelNum) {
   }
 
   makeCrates(L.crates);
+  for (const pr of L.props || []) {
+    makeEmptyCrate(pr.x, pr.z, 0);
+    if (pr.stack) makeEmptyCrate(pr.x, pr.z, 0.86);   // 叠一个，当二级台阶
+  }
   placeExtract(L.extract.x, L.extract.z);
   maybeSpawnMerchant(levelNum - 1, L);
 
@@ -280754,10 +280791,10 @@ addEventListener('blur', () => { lookFresh = true; });
 const overlay = document.getElementById('overlay');
 
 document.getElementById('galleryBtn').addEventListener('click', () => openGallery());
-document.getElementById('debugBtn').addEventListener('click', () => { pendingDebug = true; if (mobileMode) { overlay.classList.add('hidden'); startDebugRoom(); ui.mode = 'play'; } else controls.lock(); });
-document.getElementById('endlessBtn').addEventListener('click', () => { pendingEndless = true; if (mobileMode) { overlay.classList.add('hidden'); startRun(true); ui.mode = 'play'; } else controls.lock(); });
+document.getElementById('debugBtn').addEventListener('click', () => { pendingDebug = true; if (mobileMode) { overlay.classList.add('hidden'); startDebugRoom(); ui.mode = 'play'; } else safeLock(); });
+document.getElementById('endlessBtn').addEventListener('click', () => { pendingEndless = true; if (mobileMode) { overlay.classList.add('hidden'); startRun(true); ui.mode = 'play'; } else safeLock(); });
 document.getElementById('start').addEventListener('click', () => {
-  if (!mobileMode) { controls.lock(); return; }
+  if (!mobileMode) { safeLock(); return; }
   if (ui.mode === 'pause') { ui.mode = 'play'; overlay.classList.add('hidden'); return; }   // 暂停后继续，别重开
   overlay.classList.add('hidden');
   lookFresh = true;
@@ -280767,7 +280804,7 @@ document.getElementById('start').addEventListener('click', () => {
   ui.mode = 'play';
 });
 renderer.domElement.addEventListener('click', () => {
-  if (ui.mode === 'play' && !controls.isLocked) controls.lock();
+  if (ui.mode === 'play' && !controls.isLocked) safeLock();
 });
 document.getElementById('again').addEventListener('click', () => restart());
 document.getElementById('restartBtn').addEventListener('click', () => restart());
@@ -280778,11 +280815,16 @@ document.getElementById('sellAll').addEventListener('click', () => sellAllJunk()
 
 // 左键开火（只在锁定+活着的时候）
 renderer.domElement.addEventListener('mousedown', (e) => {
+  if (!controls.isLocked && !mobileMode) return;
+  if (game.state !== 'playing' || ui.mode !== 'play') return;
+  if (e.button === 2) { punch(); return; }        // 右键 = 近战
   if (e.button !== 0) return;
-  if (!controls.isLocked || game.state !== 'playing' || ui.mode !== 'play') return;
   firing = true;
   tryShoot();
 });
+
+// 右键别弹出浏览器菜单
+addEventListener('contextmenu', (e) => { e.preventDefault(); });
 window.addEventListener('mouseup', () => { firing = false; });
 
 // 浏览器拒绝了指针锁定（多半是刚按完 Esc，有 1 秒冷却）：叫玩家再点一次
@@ -280804,8 +280846,12 @@ controls.addEventListener('lock', () => {
   }
   else ui.mode = 'play';                  // 从暂停/开箱回来 = 接着玩
 });
+let lastLockedAt = 0;
+controls.addEventListener('lock', () => { lastLockedAt = performance.now(); });
 controls.addEventListener('unlock', () => {
+  lockBlockedUntil = performance.now() + 1250;
   keys.clear();
+  if (performance.now() - lastLockedAt < 260) return;   // 刚锁上就掉：是浏览器的抖动，别弹暂停
   // 只有"正在玩"的时候松开鼠标才弹菜单；开箱/结算/死亡自己管面板
   if (ui.mode === 'play') showPause();
 });
@@ -280826,9 +280872,9 @@ const BIND_DEFAULT = {
 };
 let binds = { ...BIND_DEFAULT };
 let userSens = 1;
-let userVol = 0.5;
+let userVol = 0.75;
 try { userSens = Number(localStorage.getItem('kch_sens')) || 1; } catch (e) { userSens = 1; }
-try { userVol = Number(localStorage.getItem('kch_vol')); if (isNaN(userVol)) userVol = 0.5; } catch (e) { userVol = 0.5; }
+try { userVol = Number(localStorage.getItem('kch_vol')); if (isNaN(userVol)) userVol = 0.75; } catch (e) { userVol = 0.75; }
 try {
   const saved = JSON.parse(localStorage.getItem('kch_binds') || '{}');
   for (const k in BIND_DEFAULT) if (typeof saved[k] === 'string') binds[k] = saved[k];
@@ -281677,7 +281723,7 @@ function die() {
 
 const ui = { mode: 'menu', crate: null };   // menu | play | pause | loot | result
 
-const MAX_BAG = 8;
+const MAX_BAG = 10;
 
 // 四个角色，各有各的吃饭本事
 const CHARACTERS = [
@@ -281697,23 +281743,35 @@ function bagCap() {
 
 // 物品价目表（固定数字）。junk=true 才会被商人一键回收
 const ITEM_META = {
-  // 垃圾（只在商人那卖钱）
-  废铁: { value: 8, junk: true },
-  零件: { value: 12, junk: true },
-  铜线: { value: 16, junk: true },
-  电子件: { value: 25, junk: true },
-  保险丝: { value: 26, junk: true },
-  金戒指: { value: 48, junk: true },
+  // 垃圾（只在商人那卖钱）——越值钱越稀有；max = 一格最多叠几个
+  破布: { value: 6, junk: true, max: 5 },
+  废铁: { value: 8, junk: true, max: 5 },
+  罐头: { value: 10, junk: true, max: 4 },
+  电池: { value: 13, junk: true, max: 4 },
+  零件: { value: 12, junk: true, max: 5 },
+  铜线: { value: 16, junk: true, max: 4 },
+  药瓶: { value: 22, junk: true, max: 3 },
+  电子件: { value: 25, junk: true, max: 3 },
+  保险丝: { value: 26, junk: true, max: 3 },
+  铜锭: { value: 36, junk: true, max: 2 },
+  手表: { value: 40, junk: true, max: 2 },
+  金戒指: { value: 48, junk: true, max: 2 },
+  望远镜: { value: 60, junk: true, max: 2 },
+  金链: { value: 75, junk: true, max: 1 },
+  金条: { value: 90, junk: true, max: 1 },
+  军用芯片: { value: 160, junk: true, max: 1 },
   // 消耗品（进背包，自己点着用）
-  医疗包: { value: 15, use: 'heal', hint: '回 40 血' },
+  医疗包: { value: 15, use: 'heal', hint: '回 40 血', max: 3 },
   弹药盒: { value: 10 },
-  油桶: { value: 20, use: 'fuel', hint: '给车 +30 油' },
-  修理包: { value: 18, use: 'repair', hint: '修车 +40' },
+  油桶: { value: 20, use: 'fuel', hint: '给车 +30 油', max: 2 },
+  修理包: { value: 18, use: 'repair', hint: '修车 +40', max: 3 },
 };
 
 // 箱子出东西的权重：垃圾占比高，金戒指是意外之财
 const ITEM_WEIGHT = {
-  废铁: 26, 零件: 22, 铜线: 16, 电子件: 12, 保险丝: 10, 金戒指: 4,
+  破布: 30, 废铁: 26, 罐头: 20, 零件: 20, 电池: 14, 铜线: 15,
+  药瓶: 9, 电子件: 10, 保险丝: 8, 铜锭: 4.5, 手表: 3.5,
+  金戒指: 2.5, 望远镜: 1.6, 金链: 0.9, 金条: 0.7, 军用芯片: 0.3,
   医疗包: 14, 弹药盒: 16, 油桶: 6, 修理包: 8,
 };
 
@@ -281778,40 +281836,98 @@ const interactMeshes = [];
 
 // 箱子：外形是方块，身上挂着 { prompt, canInteract, interact } 这套交互接口
 // spots 是每关的 [[x,z], ...]，颜色/名字按顺序取 CRATE_STYLE
-function makeChestMesh(x, z, i) {
-  const key = i % 2 === 1 ? 'Container_Green' : 'Container_Red';
+// 只往碰撞列表里加一个盒子（给"有模型没方块"的东西用）
+function addColliderBox(cx, cy, cz, sx, sy, sz) {
+  colliders.push({
+    minX: cx - sx / 2, maxX: cx + sx / 2,
+    minY: cy - sy / 2, maxY: cy + sy / 2,
+    minZ: cz - sz / 2, maxZ: cz + sz / 2,
+  });
+}
+
+function makeChestMesh(x, z, i, isBig = true, isGreen = false) {
+  const key = isBig ? (isGreen ? 'Container_Green' : 'Container_Red') : 'Chest';
   const m = propModels[key] || propModels.Chest;
   if (!m) return null;
   const obj = m.scene.clone(true);
   const box = new THREE.Box3().setFromObject(obj);
   const size = box.getSize(new THREE.Vector3());
-  const sc = 1.05 / (Math.max(size.x, size.z) || 1);   // 按最长边缩，别把集装箱弄成 6 米长
+  const sc = (isBig ? 1.05 : 0.8) / (Math.max(size.x, size.z) || 1);   // 按最长边缩；小箱子再小一圈
   obj.scale.setScalar(sc);
   obj.position.set(x, -box.min.y * sc, z);
-  obj.rotation.y = (i * 0.9) % (Math.PI * 2);
+  // 小箱子染个色：红=战利品，绿=修理包；大集装箱本身就是红/绿
+  if (!isBig) {
+    const tint = isGreen ? 0x46e08a : 0xff5a35;
+    obj.traverse((o) => {
+      if (o.isMesh && o.material) {
+        o.material = o.material.clone();
+        o.material.color = new THREE.Color(tint);
+      }
+    });
+  }
+  obj.rotation.y = (i % 4) * (Math.PI / 2);        // 只转 90°，碰撞盒才贴得住
   scene.add(obj);
   levelMeshes.push(obj);
   solids.push(obj);              // 子弹要能打在箱子上
   return obj;
 }
 
+// 空箱子：不能搜，但能当台阶跳上去
+function makeEmptyCrate(x, z, baseY = 0) {
+  const m = propModels.Chest;
+  if (!m) {
+    block(x, baseY + 0.42, z, 0.85, 0.85, 0.85, 0x7a6a4a);
+    return;
+  }
+  const obj = m.scene.clone(true);
+  const b0 = new THREE.Box3().setFromObject(obj);
+  const h0 = b0.max.y - b0.min.y || 1;
+  const sc = 0.85 / h0;                       // 高度固定 0.85 米，正好能跳上去
+  obj.scale.setScalar(sc);
+  obj.position.set(x, baseY - b0.min.y * sc, z);
+  obj.rotation.y = (Math.random() * 4 | 0) * (Math.PI / 2);
+  scene.add(obj);
+  levelMeshes.push(obj);
+  solids.push(obj);
+  const b = new THREE.Box3().setFromObject(obj);
+  addColliderBox(
+    (b.min.x + b.max.x) / 2, (b.min.y + b.max.y) / 2, (b.min.z + b.max.z) / 2,
+    Math.max(0.2, b.max.x - b.min.x), Math.max(0.2, b.max.y - b.min.y), Math.max(0.2, b.max.z - b.min.z)
+  );
+}
+
 function makeCrates(spots) {
   spots.forEach(([x, z], i) => {
-    const isGreen = i % 2 === 1;                   // 绿箱子专门装修理包
-    const style = isGreen ? { name: '修理箱', color: 0x4e7a5a } : CRATE_STYLE[i % CRATE_STYLE.length];
-    const mesh = block(x, 0.55, z, 1.05, 1.1, 1.05, style.color);
-    const chest = makeChestMesh(x, z, i);          // 有模型就把方块箱子藏起来
-    const shown = chest || mesh;
-    if (chest) mesh.visible = false;
+    const isBig = i % 2 === 0;                     // 偶数是大箱子（集装箱）
+    const isGreen = i % 4 === 1;                   // 绿箱子专门装修理包
+    const style = isGreen
+      ? { name: isBig ? '修理集装箱' : '小修理箱', color: 0x4e7a5a }
+      : (isBig
+        ? { name: '集装箱', color: CRATE_STYLE[i % CRATE_STYLE.length].color }
+        : { name: '军需箱', color: CRATE_STYLE[i % CRATE_STYLE.length].color });
+    const chest = makeChestMesh(x, z, i, isBig, isGreen);
+    let mesh = null;
+    let shown = chest;
+    if (chest) {
+      // 碰撞盒直接按模型的真实尺寸来，别再用一个比模型大的方块
+      const b = new THREE.Box3().setFromObject(chest);
+      addColliderBox(
+        (b.min.x + b.max.x) / 2, (b.min.y + b.max.y) / 2, (b.min.z + b.max.z) / 2,
+        Math.max(0.2, b.max.x - b.min.x), Math.max(0.2, b.max.y - b.min.y), Math.max(0.2, b.max.z - b.min.z)
+      );
+    } else {
+      mesh = block(x, 0.55, z, 0.9, 1.0, 0.8, style.color);
+      shown = mesh;
+    }
 
     // 2~3 件，名字不重复（同名会在背包里叠成一摞）
     // 红箱子：2~3 件随机；绿箱子：1~2 个修理包
     const items = [];
     if (isGreen) {
-      const n = 1 + Math.floor(Math.random() * 2);
+      const n = isBig ? (4 + Math.floor(Math.random() * 3)) : (1 + Math.floor(Math.random() * 2));
       for (let k = 0; k < n; k++) items.push({ name: '修理包', value: ITEM_META['修理包'].value });
     } else {
-      const n = 3 + Math.floor(Math.random() * 2);     // 3~4 件
+      const n = isBig ? (5 + Math.floor(Math.random() * 3)) : (2 + Math.floor(Math.random() * 2));   // 大 5~7，小 2~3
       const used = [];
       for (let k = 0; k < n; k++) {
         const name = pickLootName(used);
@@ -281821,14 +281937,14 @@ function makeCrates(spots) {
     }
 
     const crate = {
-      mesh, name: style.name, items,
+      mesh: shown, name: style.name, items,
       get prompt() { return this.items.length ? '[E] 搜索 · ' + this.name : '[空]'; },
       canInteract() { return this.items.length > 0; },
       interact() { openLoot(this); },
     };
-    mesh.userData.interactable = crate;
+    shown.userData.interactable = crate;
     crates.push(crate);
-    interactMeshes.push(mesh);
+    interactMeshes.push(shown);
   });
 }
 
@@ -281848,8 +281964,16 @@ function updateInteract() {
 
   camera.updateMatrixWorld();
   interactRay.setFromCamera(_center, camera);
-  const hits = interactRay.intersectObjects(interactMeshes, false);
-  const target = hits.length ? hits[0].object.userData.interactable : null;
+  const hits = interactRay.intersectObjects(interactMeshes, true);
+  let target = null;
+  if (hits.length) {
+    // 模型是骨骼/组层级，命中点可能在子网格上，往上找到挂交互的那一层
+    let o = hits[0].object;
+    while (o && !target) {
+      if (o.userData && o.userData.interactable) target = o.userData.interactable;
+      o = o.parent;
+    }
+  }
 
   if (target) {
     wantInteract = target;
@@ -282057,12 +282181,22 @@ function setupTouch() {
 }
 setupTouch();
 
+// 浏览器规定：刚退出鼠标锁定的一小段时间内不许再锁，这里排队重试
+let lockBlockedUntil = 0;
+function safeLock() {
+  const wait = lockBlockedUntil - performance.now();
+  if (wait > 0) { setTimeout(safeLock, wait + 60); return; }
+  try {
+    controls.lock();
+  } catch (e) {
+    lockBlockedUntil = performance.now() + 1250;
+    setTimeout(safeLock, 1300);
+  }
+}
+
 function relock() {
   if (mobileMode) { ui.mode = 'play'; return; }
-  controls.lock();
-  setTimeout(() => {
-    if (ui.mode === 'play' && !controls.isLocked) showPause();
-  }, 500);
+  safeLock();          // 排队重试，锁不上就让玩家点一下画面，别再自动弹暂停
 }
 
 function renderLoot() {
@@ -282114,8 +282248,11 @@ function takeItem(crate, item) {
   }
 
   // 药 / 油 / 修理包都进背包，由玩家自己决定什么时候用
+  const cap = (ITEM_META[item.name] && ITEM_META[item.name].max) || 5;
   let stack = null;
-  for (const s of backpack) if (s.name === item.name) { stack = s; break; }
+  for (const s of backpack) {
+    if (s.name === item.name && s.count < cap) { stack = s; break; }
+  }
 
   if (!stack && backpack.length >= bagCap()) {
     lootTip.textContent = '背包已满';
@@ -282158,37 +282295,96 @@ function closeBag() {
 }
 
 function renderBag() {
-  bagHead.textContent = '背包 ' + backpack.length + '/' + bagCap() + ' ｜ 总价值 ' + bagValue();
+  bagHead.textContent = '背包 ' + backpack.length + '/' + bagCap() + ' · 总价值 ' + bagValue();
   bagList.replaceChildren();
 
   if (!backpack.length) {
     const p = document.createElement('div');
     p.className = 'empty';
-    p.textContent = '空的。箱子就在屋里，去搜。';
+    p.textContent = '空的。箱子就在街上，去搜。';
     bagList.appendChild(p);
   }
 
-  for (const s of backpack) {
+  backpack.forEach((s, idx) => {
     const meta = ITEM_META[s.name] || {};
     const usable = !!meta.use;
+    const cap = meta.max || 5;
 
-    const row = document.createElement(usable ? 'button' : 'div');
-    if (usable) row.type = 'button';
+    const row = document.createElement('div');
     row.className = 'row' + (usable ? ' usable' : '');
+    row.dataset.idx = String(idx);
 
     const label = document.createElement('span');
-    label.textContent = s.name + ' × ' + s.count;
+    label.textContent = s.name;
 
     const val = document.createElement('span');
     val.className = 'v';
-    val.textContent = usable ? (meta.hint + ' · 用') : ('价值 ' + s.value * s.count);
+    val.textContent = '×' + s.count + '/' + cap + '　' + (usable ? meta.hint + ' · 用' : '价值 ' + s.value * s.count);
+
+    const del = document.createElement('button');
+    del.className = 'del';
+    del.textContent = '✕';
+    del.title = '丢掉这个';
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      discardItem(s);
+    });
 
     row.appendChild(label);
     row.appendChild(val);
-    if (usable) row.addEventListener('click', () => useItem(s));
+    row.appendChild(del);
+    row.addEventListener('pointerdown', (e) => startBagDrag(e, idx, row));
     bagList.appendChild(row);
-  }
+  });
 }
+
+// ---- 背包拖动排序 / 点击使用 ----
+let bagDrag = null;
+
+function startBagDrag(e, idx, row) {
+  if (e.target && e.target.className === 'del') return;
+  bagDrag = { idx, startY: e.clientY, dragging: false, row, ghost: null };
+  try { row.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+}
+
+addEventListener('pointermove', (e) => {
+  if (!bagDrag) return;
+  if (!bagDrag.dragging && Math.abs(e.clientY - bagDrag.startY) > 6) {
+    bagDrag.dragging = true;
+    const g = document.createElement('div');
+    g.className = 'row ghost';
+    g.textContent = backpack[bagDrag.idx] ? backpack[bagDrag.idx].name : '';
+    g.style.position = 'fixed';
+    g.style.pointerEvents = 'none';
+    g.style.zIndex = '99';
+    g.style.width = (bagDrag.row.offsetWidth || 260) + 'px';
+    document.body.appendChild(g);
+    bagDrag.ghost = g;
+    bagDrag.row.style.opacity = '.35';
+  }
+  if (bagDrag.dragging) {
+    bagDrag.ghost.style.left = (e.clientX + 14) + 'px';
+    bagDrag.ghost.style.top = (e.clientY - 18) + 'px';
+  }
+});
+
+addEventListener('pointerup', (e) => {
+  if (!bagDrag) return;
+  const d = bagDrag;
+  bagDrag = null;
+  if (d.ghost) d.ghost.remove();
+  if (d.row) d.row.style.opacity = '';
+  if (d.dragging) {
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const target = el && el.closest ? el.closest('.row') : null;
+    if (target && target.dataset && target.dataset.idx !== undefined) {
+      moveBagItem(d.idx, Number(target.dataset.idx));
+    }
+  } else {
+    const st = backpack[d.idx];
+    if (st && ITEM_META[st.name] && ITEM_META[st.name].use) useItem(st);
+  }
+});
 
 // 在背包里手动用：药回血、油桶加油、修理包装修
 function useItem(stack) {
@@ -283016,8 +283212,8 @@ function carMaxSpeed() {
 
 function carBlocked(x, z, yaw) {
   const fx = Math.cos(yaw), fz = Math.sin(yaw);
-  const half = car.len * 0.34;
-  const r = car.wid * 0.44;
+  const half = car.len * 0.33;
+  const r = car.wid * 0.42;
   for (const off of [-half, 0, half]) {
     if (blockedAt(x + fx * off, z + fz * off, r)) return true;
   }
@@ -283246,18 +283442,27 @@ function updateCarHUD() {
 function pushPlayerFromCar() {
   if (!carHere || driving) return;
   const fx = Math.cos(car.yaw), fz = Math.sin(car.yaw);
-  const r = car.wid * 0.5 + 0.35;
-  for (const off of [-car.len * 0.3, 0, car.len * 0.3]) {
-    const cx = car.x + fx * off;
-    const cz = car.z + fz * off;
-    const dx = player.pos.x - cx, dz = player.pos.z - cz;
-    const d = Math.hypot(dx, dz);
-    if (d >= r) continue;
-    if (d < 1e-4) { player.pos.x = cx + r; continue; }
-    player.pos.x = cx + (dx / d) * r;
-    player.pos.z = cz + (dz / d) * r;
+  const dx = player.pos.x - car.x, dz = player.pos.z - car.z;
+  // 换到车的局部坐标：along = 车头方向，side = 车身横向
+  const along = dx * fx + dz * fz;
+  const side = -dx * fz + dz * fx;
+  const halfL = car.len * 0.5 + CFG.radius;
+  const halfW = car.wid * 0.5 + CFG.radius;
+  if (Math.abs(along) >= halfL || Math.abs(side) >= halfW) return;
+
+  const pushL = halfL - Math.abs(along);     // 从车头/车尾出去还需要多少
+  const pushW = halfW - Math.abs(side);      // 从侧面出去还需要多少
+  if (pushW <= pushL) {
+    const sg = side >= 0 ? 1 : -1;
+    player.pos.x = car.x + fx * along - fz * sg * halfW;
+    player.pos.z = car.z + fz * along + fx * sg * halfW;
+  } else {
+    const sg = along >= 0 ? 1 : -1;
+    player.pos.x = car.x + fx * sg * halfL - fz * side;
+    player.pos.z = car.z + fz * sg * halfL + fx * side;
   }
 }
+
 
 /* ---------------------------- 油桶 / 修理箱 ------------------------------ */
 
@@ -283271,14 +283476,37 @@ function removePickup(mesh) {
   if (j >= 0) levelMeshes.splice(j, 1);
 }
 
+// 往背包塞一个：先找没满的同名格子，没有就开新格
 function addItem(name) {
   const meta = ITEM_META[name];
   if (!meta) return false;
-  for (const s of backpack) if (s.name === name) { s.count++; updateHUD(); return true; }
+  const cap = meta.max || 5;
+  for (const s of backpack) {
+    if (s.name === name && s.count < cap) { s.count++; updateHUD(); return true; }
+  }
   if (backpack.length >= bagCap()) return false;
   backpack.push({ name, value: meta.value, count: 1 });
   updateHUD();
   return true;
+}
+
+// 丢一个格子（永远消失）
+function discardItem(stack) {
+  const i = backpack.indexOf(stack);
+  if (i < 0) return;
+  backpack.splice(i, 1);
+  Sound.ui();
+  toast('丢掉 ' + stack.name + ' ×' + stack.count);
+  renderBag();
+  updateHUD();
+}
+
+// 拖动排序
+function moveBagItem(from, to) {
+  if (from === to || from < 0 || to < 0 || from >= backpack.length || to >= backpack.length) return;
+  const [it] = backpack.splice(from, 1);
+  backpack.splice(to, 0, it);
+  renderBag();
 }
 
 // 地上的油桶 / 修理包：捡进背包，到车旁边自己开 B 用
@@ -283445,7 +283673,7 @@ function endRun(kind) {
 
   resultTitle.textContent = kind === 'dead' ? '阵 亡' : '通 关';
   resultTitle.className = kind === 'dead' ? 'bad' : 'good';
-  resultLevelEl.textContent = run.level + ' / ' + RUN_MAX;
+  resultLevelEl.textContent = run.endless ? ('第 ' + run.level + ' 关（无尽）') : (run.level + ' / ' + RUN_MAX);
   resultKillsEl.textContent = game.kills;
   resultGoldEl.textContent = run.gold;
   resultBestEl.textContent = '第 ' + run.best + ' 关';
@@ -283564,6 +283792,7 @@ const hpFillEl = document.getElementById('hpFill');
 const aliveEl = document.getElementById('aliveNum');
 const killEl = document.getElementById('killNum');
 const bagEl = document.getElementById('bagNum');
+const bagCapNumEl = document.getElementById('bagCapNum');
 const goldEl = document.getElementById('goldNum');
 const timerEl = document.getElementById('timer');
 const levelTagEl = document.getElementById('levelTag');
@@ -283586,6 +283815,7 @@ function updateHUD() {
   aliveEl.textContent = alive;
   killEl.textContent = game.kills;
   bagEl.textContent = backpack.length;
+  if (typeof bagCapNumEl !== 'undefined' && bagCapNumEl) bagCapNumEl.textContent = bagCap();
   goldEl.textContent = run.gold;
 }
 
@@ -283612,6 +283842,7 @@ function renderHeroes() {
 function showMenu() {
   ui.mode = 'menu';
   renderHeroes();
+  overlay.classList.remove('paused');
   overlayTitle.textContent = '空 城';
   overlaySub.textContent = '搜 · 打 · 撤　/　城市 · 沙漠 · 荒野';
   startBtn.textContent = '点 击 进 入';
@@ -283621,11 +283852,13 @@ function showMenu() {
 
 function showPause() {
   ui.mode = 'pause';
-  overlayTitle.textContent = '空 城';
-  overlaySub.textContent = '搜 · 打 · 撤　/　城市 · 沙漠 · 荒野';
+  overlay.classList.remove('paused');
+  overlayTitle.textContent = '暂 停';
+  overlaySub.textContent = '看一眼键位，或者直接继续';
   startBtn.textContent = '继 续';
   restartBtn.classList.remove('hidden');
   overlay.classList.remove('hidden');
+  overlay.classList.add('paused');        // 关内暂停：藏掉选人和模式按钮
 }
 
 /* ------------------------------ 碰撞求解 -------------------------------- */
@@ -283913,7 +284146,7 @@ window.__doom = {
   extract: () => extractT, showPause, showMenu,
   ammo, startReload, updateReload, updateGun, updateAmmoHUD, WEAPONS, tryShoot,
   mobileMode: () => mobileMode, setMobileMode, touchAxes, Sound, openSettings, closeSettings, binds, BIND_DEFAULT, propModels, merchantGroup: () => merchantGroup, updateMerchant, viewModel, refreshViewModel, updateViewModel, tracers, updateTracers, addTracer, bolts, updateBolts, fireBolt, punch, updateMelee, melee, MELEES, curMelee, curWeapon, magSize, reloadTime, gunDamage, CHARACTERS, bagCap, getHero: () => hero, setHero: (id) => { hero = CHARACTERS.find((c) => c.id === id) || hero; }, armored: damaged, ITEM_META, bagCount, bagValue,
-  openBag, closeBag, bagPanel, useItem, addItem,
+  openBag, closeBag, bagPanel, useItem, addItem, discardItem, moveBagItem, renderBag,
   run, LEVELS, RUN_MAX, LEVEL_ENEMY_COUNT, enterLevel, levelClear, buildLevel, clearLevel, generateLayout, buildGenerated, current,
   startRun, resetRun, bannerEl, fadeEl,
   shop: { open: openShop, close: closeShop, buy, sellAllJunk, render: renderShop },
