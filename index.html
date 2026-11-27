@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <meta name="color-scheme" content="dark" />
 <meta name="description" content="空城 · 搜打撤 FPS 原型：随机街区、开车推进、下车搜刮、活着撤离。" />
 <meta name="theme-color" content="#07090c" />
@@ -10,7 +10,8 @@
 <title>空城</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #07090c; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #07090c;
+    touch-action: none; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
   body {
     font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
     color: #d8dee9; -webkit-user-select: none; user-select: none;
@@ -63,9 +64,9 @@
   }
 
   /* 触屏操作 */
-  #touch { position: absolute; inset: 0; display: none; z-index: 55; pointer-events: none; }
+  #touch { position: absolute; inset: 0; display: none; z-index: 55; pointer-events: none; touch-action: none; }
   body.touch-mode #touch { display: block; }
-  #touch #lookPad { position: absolute; inset: 0; pointer-events: auto; }
+  #touch #lookPad { position: absolute; inset: 0; pointer-events: auto; touch-action: none; }
   #touch #stick {
     position: absolute; left: 26px; bottom: 26px; width: 132px; height: 132px;
     border-radius: 50%; background: rgba(20, 28, 36, .5); border: 2px solid rgba(150, 190, 220, .35);
@@ -483,7 +484,7 @@
   <p class="tiny" id="overlayTip">一局最多 5 关：搜箱子（<b>B</b> 看背包和总价值）、打怪、走到绿光柱撤离进下一关。<br />能开车（<b>F</b> 上下车，<b>WASD</b> 开），<b>1~4</b> 切枪。死了整局清零。</p>
   <p class="tiny dim">调试：<b>G</b> 无敌 · <b>H</b> 无限子弹</p>
   <p class="tiny dim" id="credits">模型：Quaternius（CC0 1.0） · 引擎：Three.js（MIT）</p>
-  <p class="tiny dim" id="buildTag">空城 build 2026-11-24 20:26</p>
+  <p class="tiny dim" id="buildTag">空城 build 2026-11-27 22:03</p>
 </div>
 
 <div id="loot">
@@ -279744,7 +279745,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkeleton } from 'three/addons/utils/SkeletonUtils.js';
 
 window.__doomBooted = true;
-console.log('%c空城 build 2026-11-24 20:26', 'color:#e8b45a');
+console.log('%c空城 build 2026-11-27 22:03', 'color:#e8b45a');
 
 const errBox = document.getElementById('err');
 errBox.style.display = 'none';   // 加载慢过 8 秒时上面会先弹提示，模块起来了就撤掉
@@ -281401,7 +281402,7 @@ function doPunch() {
     any = true;
     en.flash = 0.12;
     // 残血一击必杀
-    en.hp = en.hp < en.maxHp * 0.3 ? 0 : en.hp - curMelee().damage;
+    en.hp = en.hp < en.maxHp * 0.3 ? 0 : en.hp - curMelee().damage * (hero.id === 'assault' ? 1.5 : 1);
     en.bar.scale.x = Math.max(0.001, en.hp / en.maxHp);
     pushEnemy(en, nx, nz, curMelee().knockback);
     if (en.hp <= 0) killEnemy(en);
@@ -281660,21 +281661,31 @@ function moveEnemy(en, ux, uz, stepLen) {
 }
 
 // 卡住了：在附近找一圈能站的点，挑离目标最近的那个挪过去
+const _camFwd = new THREE.Vector3();
 function relocateEnemy(en) {
   // 离玩家太远（>28m）说明它根本过不来，直接挪到玩家周围 14~18 米的空地
-  const far = Math.hypot(en.mesh.position.x - player.pos.x, en.mesh.position.z - player.pos.z);
-  if (far > 28) {
-    for (let i = 0; i < 24; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = 14 + Math.random() * 4;
-      const x = player.pos.x + Math.cos(a) * r;
-      const z = player.pos.z + Math.sin(a) * r;
-      if (!blockedAt(x, z, en.radius)) {
-        en.mesh.position.x = x;
-        en.mesh.position.z = z;
-        en.lastX = player.pos.x;
-        en.lastZ = player.pos.z;
-        return;
+  const dxp = en.mesh.position.x - player.pos.x;
+  const dzp = en.mesh.position.z - player.pos.z;
+  const far = Math.hypot(dxp, dzp);
+  if (far > 30) {
+    camera.getWorldDirection(_camFwd);
+    const fl = Math.hypot(_camFwd.x, _camFwd.z) || 1;
+    const fx2 = _camFwd.x / fl, fz2 = _camFwd.z / fl;
+    // 只在玩家背后（看不见）才挪；视野里绝不瞬移，挪也只挪到背后扇形
+    if ((dxp / far) * fx2 + (dzp / far) * fz2 < -0.15) {
+      const behind = Math.atan2(fz2, fx2) + Math.PI;
+      for (let i = 0; i < 24; i++) {
+        const a = behind + (Math.random() - 0.5) * 2.0;
+        const r = 15 + Math.random() * 4;
+        const x = player.pos.x + Math.cos(a) * r;
+        const z = player.pos.z + Math.sin(a) * r;
+        if (!blockedAt(x, z, en.radius)) {
+          en.mesh.position.x = x;
+          en.mesh.position.z = z;
+          en.lastX = player.pos.x;
+          en.lastZ = player.pos.z;
+          return;
+        }
       }
     }
   }
@@ -281729,10 +281740,10 @@ const MAX_BAG = 10;
 
 // 四个角色，各有各的吃饭本事
 const CHARACTERS = [
-  { id: 'assault', name: '突击手', perk: '枪械伤害 +35%', color: '#e0704a' },
-  { id: 'armor', name: '装甲兵', perk: '车耐久 +60%，带装甲板', color: '#5a8ac0' },
-  { id: 'fast', name: '快手', perk: '弹匣 ×2，换弹速度 ×2', color: '#d8b45a' },
-  { id: 'packer', name: '背包客', perk: '背包容量 ×2，背包升级 ×2', color: '#63b07a' },
+  { id: 'assault', name: '突击手', perk: '全部伤害 +50%，弹药获取 ×2', color: '#e0704a' },
+  { id: 'armor', name: '装甲兵', perk: '车耐久 +60%，只开装甲车；修车额外 +30 耐久', color: '#5a8ac0' },
+  { id: 'fast', name: '快手', perk: '弹匣 ×2、换弹速度 ×2；移速 +12%，撤离时间 -40%', color: '#d8b45a' },
+  { id: 'packer', name: '背包客', perk: '背包容量 ×2，背包升级也 ×2', color: '#63b07a' },
 ];
 let hero = CHARACTERS[0];
 
@@ -281817,9 +281828,14 @@ function switchWeapon(idx) {
 function curWeapon() { return WEAPONS[run.weaponIdx] || WEAPONS[0]; }
 
 // 快手：弹匣 ×2、换弹时间 ÷2
+// 角色专属数值
+function repairAmount() { return hero.id === 'armor' ? 70 : 40; }        // 装甲兵修车额外 +30
+function moveMul() { return hero.id === 'fast' ? 1.12 : 1; }            // 快手跑得快
+function extractNeed() { return EXTRACT.need * (hero.id === 'fast' ? 0.6 : 1); }   // 快手撤离更快
+
 function magSize() { return curWeapon().mag * (hero.id === 'fast' ? 2 : 1); }
 function reloadTime() { return curWeapon().reload / (hero.id === 'fast' ? 2 : 1); }
-function gunDamage() { return curWeapon().damage * (hero.id === 'assault' ? 1.35 : 1); }
+function gunDamage() { return curWeapon().damage * (hero.id === 'assault' ? 1.5 : 1); }
 
 function bagCount() {
   let n = 0;
@@ -282137,8 +282153,8 @@ function setupTouch() {
   });
   lookPad.addEventListener('pointermove', (e) => {
     if (e.pointerId !== lookId) return;
-    const dx = (e.clientX - lookX) * 2.4;
-    const dy = (e.clientY - lookY) * 2.4;
+    const dx = (e.clientX - lookX) * 2.0;
+    const dy = (e.clientY - lookY) * 2.0;
     lookX = e.clientX; lookY = e.clientY;
     if (dx || dy) applyLook(dx, dy);
   });
@@ -282242,7 +282258,7 @@ function takeItem(crate, item) {
   // 弹药盒还是当场吃掉：它不算"物资"，捡了就该变成子弹
   if (item.name === '弹药盒') {
     crate.items.splice(idx, 1);
-    ammo.reserve += 12;
+    ammo.reserve += 12 * (hero.id === 'assault' ? 2 : 1);
     updateAmmoHUD();
     toast('备弹 +12');
     renderLoot();
@@ -282406,7 +282422,7 @@ function useItem(stack) {
     if (!carHere || Math.hypot(car.x - player.pos.x, car.z - player.pos.z) > 6) { toast('车不在附近'); return; }
     if (car.hp >= (car.hpMax || CAR.hpMax)) { toast('车况良好'); return; }
     const wasBurning = car.burning > 0;
-    car.hp = Math.min(car.hpMax || CAR.hpMax, car.hp + (wasBurning ? 40 : 40));
+    car.hp = Math.min(car.hpMax || CAR.hpMax, car.hp + repairAmount());
     car.burning = 0;
     updateCarDamage(0);
     toast((wasBurning ? '火扑灭了 · ' : '') + '修理 +40 · 耐久 ' + Math.round(car.hp));
@@ -282709,7 +282725,7 @@ function updateExtraction(dt) {
 
   if (inside) {
     extractT += dt;
-    if (extractT >= EXTRACT.need) {
+    if (extractT >= extractNeed()) {
       extractT = 0;
       levelClear();                 // 不是结算，是进下一关（第 5 关才结算）
       return;
@@ -282720,7 +282736,7 @@ function updateExtraction(dt) {
 
   const on = extractT > 0;
   extractWrap.classList.toggle('show', on);
-  if (on) extractFill.style.width = (extractT / EXTRACT.need * 100).toFixed(1) + '%';
+  if (on) extractFill.style.width = (extractT / extractNeed() * 100).toFixed(1) + '%';
 }
 
 /* -------------------------------- 商人 ---------------------------------- */
@@ -282888,7 +282904,7 @@ function buy(key) {
 
   run.gold -= price;
   if (key === 'ammo') {
-    ammo.reserve += 12;
+    ammo.reserve += 12 * (hero.id === 'assault' ? 2 : 1);
     toast('备弹 +12');
   } else if (key === 'medkit') {
     game.hp = Math.min(game.maxHp, game.hp + 40);
@@ -283265,18 +283281,28 @@ function updateCar(dt) {
   if (driving) {
     const maxS = carMaxSpeed();
 
-    if (keys.has(binds.forward)) car.speed += CAR.accel * dt;
-    else if (keys.has(binds.back)) car.speed -= CAR.brake * dt;
+    // 键盘 + 触屏摇杆一起算
+    let fwdIn = 0, sideIn = 0;
+    if (keys.has(binds.forward)) fwdIn += 1;
+    if (keys.has(binds.back)) fwdIn -= 1;
+    if (keys.has(binds.right)) sideIn += 1;
+    if (keys.has(binds.left)) sideIn -= 1;
+    if (mobileMode && (touchAxes.x || touchAxes.y)) {
+      fwdIn += touchAxes.y;
+      sideIn += touchAxes.x;
+    }
+    fwdIn = Math.max(-1, Math.min(1, fwdIn));
+    sideIn = Math.max(-1, Math.min(1, sideIn));
+
+    if (fwdIn > 0.1) car.speed += CAR.accel * dt * fwdIn;
+    else if (fwdIn < -0.1) car.speed += CAR.brake * dt * fwdIn;
     else {
       const f = CAR.friction * dt;
       car.speed = Math.abs(car.speed) <= f ? 0 : car.speed - Math.sign(car.speed) * f;
     }
     car.speed = Math.max(-CAR.reverseMax, Math.min(maxS, car.speed));
 
-    // 转向：静止转不动，速度越高越肉；没耐久再笨一点
-    let steer = 0;
-    if (keys.has(binds.left)) steer -= 1;   // A 往左打，yaw 增大是往右
-    if (keys.has(binds.right)) steer += 1;
+    let steer = sideIn;
     const sp = Math.abs(car.speed);
     const grip = Math.min(1, sp / 3) * (1 - 0.35 * Math.min(1, sp / car.maxSpeed));
     car.yaw += steer * 1.9 * grip * (car.hp <= 0 ? 0.6 : 1) * dt * (car.speed < 0 ? -1 : 1);
@@ -283705,7 +283731,7 @@ function resetRun() {
   backpack.length = 0;
 
   ammo.mag = magSize();
-  ammo.reserve = 60;
+  ammo.reserve = 60 * (hero.id === 'assault' ? 2 : 1);
   ammo.reloading = false;
   ammo.reloadT = 0;
   reloadWrap.classList.remove('show');
@@ -283995,7 +284021,7 @@ function step(dt) {
   // 1) 目标速度 + 加速度（指数逼近，帧率无关）
   readMoveInput(_dir);
   const sprinting = keys.has(binds.sprint) || keys.has('ShiftRight');
-  const target = sprinting ? CFG.sprint : CFG.walk;
+  const target = (sprinting ? CFG.sprint : CFG.walk) * moveMul();
   const accel = p.onGround ? CFG.accelGround : CFG.accelAir;
   const k = 1 - Math.exp(-accel * dt);
   p.vel.x += (_dir.x * target - p.vel.x) * k;
@@ -284147,7 +284173,7 @@ window.__doom = {
   crates, backpack, makeCrates, openLoot, closeLoot, takeItem, endRun, EXTRACT,
   extract: () => extractT, showPause, showMenu,
   ammo, startReload, updateReload, updateGun, updateAmmoHUD, WEAPONS, tryShoot,
-  mobileMode: () => mobileMode, setMobileMode, touchAxes, Sound, openSettings, closeSettings, binds, BIND_DEFAULT, propModels, merchantGroup: () => merchantGroup, updateMerchant, viewModel, refreshViewModel, updateViewModel, tracers, updateTracers, addTracer, bolts, updateBolts, fireBolt, punch, updateMelee, melee, MELEES, curMelee, curWeapon, magSize, reloadTime, gunDamage, CHARACTERS, bagCap, getHero: () => hero, setHero: (id) => { hero = CHARACTERS.find((c) => c.id === id) || hero; }, armored: damaged, ITEM_META, bagCount, bagValue,
+  mobileMode: () => mobileMode, setMobileMode, touchAxes, Sound, openSettings, closeSettings, binds, BIND_DEFAULT, propModels, merchantGroup: () => merchantGroup, updateMerchant, viewModel, refreshViewModel, updateViewModel, tracers, updateTracers, addTracer, bolts, updateBolts, fireBolt, punch, updateMelee, melee, MELEES, curMelee, curWeapon, magSize, reloadTime, gunDamage, repairAmount, moveMul, extractNeed, CHARACTERS, bagCap, getHero: () => hero, setHero: (id) => { hero = CHARACTERS.find((c) => c.id === id) || hero; }, armored: damaged, ITEM_META, bagCount, bagValue,
   openBag, closeBag, bagPanel, useItem, addItem, discardItem, moveBagItem, renderBag,
   run, LEVELS, RUN_MAX, LEVEL_ENEMY_COUNT, enterLevel, levelClear, buildLevel, clearLevel, generateLayout, buildGenerated, current,
   startRun, resetRun, bannerEl, fadeEl,
